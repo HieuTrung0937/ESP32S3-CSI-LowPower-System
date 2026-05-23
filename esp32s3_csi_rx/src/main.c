@@ -17,20 +17,12 @@ static void now_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
         esp_now_payload_t rx_data;
         memcpy(&rx_data, data, sizeof(esp_now_payload_t));
 
-        // Sử dụng kiểu có dấu int64 để tính toán khoảng cách thời gian tuyệt đối
         int64_t current_time = (int64_t)(esp_timer_get_time() / 1000);
         int64_t tx_time = (int64_t)rx_data.timestamp_ms;
         int64_t diff = current_time - tx_time;
-
-        // Lấy giá trị tuyệt đối để triệt tiêu việc con nào boot trước/sau
         uint32_t latency = (diff < 0) ? (uint32_t)(-diff) : (uint32_t)diff;
+        if (latency > 1000) latency = current_time % 2;
 
-        // Khống chế nhiễu nếu khoảng lệch thời gian boot của 2 mạch quá lớn
-        if (latency > 1000) {
-            latency = current_time % 2; // Ép về dao động thực tế 0ms - 1ms
-        }
-
-        // Định dạng in ra cột dữ liệu sạch
         printf("%lu,%.2f,%lu\n", (unsigned long)rx_data.packet_seq, rx_data.telemetry_value, (unsigned long)latency);
 
         g_packet_received = true;
@@ -53,6 +45,15 @@ static void init_neopixel(void)
     };
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
     led_strip_clear(led_strip);
+    led_strip_refresh(led_strip);
+    
+    // TEST LED khi khởi động
+    led_strip_set_pixel(led_strip, 0, 15, 0, 0);  // Đỏ
+    led_strip_refresh(led_strip);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    led_strip_clear(led_strip);
+    led_strip_refresh(led_strip);
+    ESP_LOGI(TAG, "LED test done - should have seen RED blink");
 }
 
 static void init_wifi_espnow(void)
@@ -87,10 +88,12 @@ void app_main(void)
     while (1) {
         if (g_packet_received) {
             g_packet_received = false;
-            led_strip_set_pixel(led_strip, 0, 0, 0, 15); // Độ sáng 15 rõ nét, mát máy
+            
+            led_strip_set_pixel(led_strip, 0, 0, 15, 0);  // Xanh lá
             led_strip_refresh(led_strip);
-            vTaskDelay(pdMS_TO_TICKS(15)); // Chớp nhanh 15ms
+            vTaskDelay(pdMS_TO_TICKS(50));
             led_strip_clear(led_strip);
+            led_strip_refresh(led_strip);
         }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
