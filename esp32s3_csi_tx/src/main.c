@@ -5,22 +5,23 @@
 
 static const char *TAG = "ESP_NOW_TX";
 static led_strip_handle_t led_strip;
+static uint32_t send_count = 0;
 
-// Hàm phản hồi khi gói tin được bắn đi
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 static void now_send_cb(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)
 #else
 static void now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 #endif
 {
+    send_count++;
     if (status == ESP_NOW_SEND_SUCCESS) {
-        ESP_LOGI(TAG, "Gui thanh cong");
-        // Bật màu Xanh Lá độ sáng 10 vừa đủ nhìn, mát mạch
+        if (send_count % 100 == 0) {
+            ESP_LOGI(TAG, "OK #%lu", send_count);
+        }
         led_strip_set_pixel(led_strip, 0, 10, 0, 0);
         led_strip_refresh(led_strip);
     } else {
-        ESP_LOGE(TAG, "Gui THAT BAI");
-        // Bật màu Đỏ báo lỗi kết nối
+        ESP_LOGE(TAG, "FAIL #%lu", send_count);
         led_strip_set_pixel(led_strip, 0, 0, 10, 0);
         led_strip_refresh(led_strip);
     }
@@ -42,6 +43,13 @@ static void init_neopixel(void)
     };
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
     led_strip_clear(led_strip);
+    
+    // Test LED khi khởi động
+    led_strip_set_pixel(led_strip, 0, 10, 0, 0);
+    led_strip_refresh(led_strip);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    led_strip_clear(led_strip);
+    led_strip_refresh(led_strip);
 }
 
 static void init_wifi_espnow(void)
@@ -54,13 +62,14 @@ static void init_wifi_espnow(void)
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
-    
     ESP_ERROR_CHECK(esp_wifi_set_channel(ESPNOW_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE));
 
-    // Hạ công suất xuống mức 40 để chip chạy mát 24/7 trên bàn làm việc
-    esp_wifi_set_max_tx_power(40); 
+    // TX power vừa phải để CSI nhạy
+    esp_wifi_set_max_tx_power(20); 
 
-    ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
+    // BẮT BUỘC: Bật 11N để có CSI
+    ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, 
+        WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N));
 }
 
 void app_main(void)
@@ -86,32 +95,27 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_now_add_peer(&peer_info));
 
     esp_now_rate_config_t rate_config = {
-        .phymode = WIFI_PHY_MODE_11B,
-        .rate = WIFI_PHY_RATE_1M_L,
+        .phymode = WIFI_PHY_MODE_11G,
+        .rate = WIFI_PHY_RATE_2M_L,
         .ersu = false
     };
     esp_now_set_peer_rate_config(MAC_BOARD_RX, &rate_config);
 
-    ESP_LOGI(TAG, "TX San sang phat...");
+    ESP_LOGI(TAG, "TX ready - 100Hz mode for CSI");
 
-    esp_now_payload_t tx_data;
-    tx_data.packet_seq = 0;
-    tx_data.telemetry_value = 11.7f; 
+    esp_now_payload_t tx_data = {0, 0, 11.7f};
 
     while (1) {
         tx_data.packet_seq++;
-        
-        // ĐỒNG BỘ: Ép kiểu uint32_t chuẩn để gửi sang RX không bị lỗi bit âm
         tx_data.timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        tx_data.telemetry_value += 0.05f;
+        tx_data.telemetry_value += 0.01f;
         
         esp_now_send(MAC_BOARD_RX, (uint8_t *)&tx_data, sizeof(tx_data));
 
-        // Tắt đèn sau khi phát 30ms để tạo nhịp chớp nháy rõ ràng
-        vTaskDelay(pdMS_TO_TICKS(30));
+        // 100Hz = 10ms/cycle
+        vTaskDelay(pdMS_TO_TICKS(5));
         led_strip_clear(led_strip);
-
-        // Chờ nốt chu kỳ còn lại (Phát mỗi giây 1 gói)
-        vTaskDelay(pdMS_TO_TICKS(970)); 
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

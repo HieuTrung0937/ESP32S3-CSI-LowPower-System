@@ -5,27 +5,21 @@
 
 static const char *TAG = "ESP_NOW_RX";
 static led_strip_handle_t led_strip;
-static volatile bool g_packet_received = false;
+static volatile uint32_t csi_count = 0;
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-static void now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
-#else
-static void now_recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len)
-#endif
-{
-    if (len == sizeof(esp_now_payload_t)) {
-        esp_now_payload_t rx_data;
-        memcpy(&rx_data, data, sizeof(esp_now_payload_t));
-
-        int64_t current_time = (int64_t)(esp_timer_get_time() / 1000);
-        int64_t tx_time = (int64_t)rx_data.timestamp_ms;
-        int64_t diff = current_time - tx_time;
-        uint32_t latency = (diff < 0) ? (uint32_t)(-diff) : (uint32_t)diff;
-        if (latency > 1000) latency = current_time % 2;
-
-        printf("%lu,%.2f,%lu\n", (unsigned long)rx_data.packet_seq, rx_data.telemetry_value, (unsigned long)latency);
-
-        g_packet_received = true;
+// Promiscuous callback - nhận tất cả gói Wi-Fi
+static void IRAM_ATTR promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
+    wifi_promiscuous_pkt_t *pkt = (wifi_promiscuous_pkt_t *)buf;
+    wifi_pkt_rx_ctrl_t *ctrl = (wifi_pkt_rx_ctrl_t *)&pkt->rx_ctrl;
+    
+    // Chỉ xử lý gói từ TX (theo MAC)
+    uint8_t *mac = pkt->payload + 10; // Địa chỉ MAC nguồn trong frame 802.11
+    if (memcmp(mac, MAC_BOARD_TX, 6) == 0) {
+        // Đây là gói từ TX, có CSI
+        csi_count++;
+        if (csi_count % 100 == 0) {
+            ESP_LOGI(TAG, "Got packet from TX #%lu, RSSI=%d", csi_count, ctrl->rssi);
+        }
     }
 }
 
@@ -47,25 +41,30 @@ static void init_neopixel(void)
     led_strip_clear(led_strip);
     led_strip_refresh(led_strip);
     
-    // TEST LED khi khởi động
-    led_strip_set_pixel(led_strip, 0, 15, 0, 0);  // Đỏ
+    led_strip_set_pixel(led_strip, 0, 15, 0, 0);
     led_strip_refresh(led_strip);
     vTaskDelay(pdMS_TO_TICKS(500));
     led_strip_clear(led_strip);
     led_strip_refresh(led_strip);
-    ESP_LOGI(TAG, "LED test done - should have seen RED blink");
+    ESP_LOGI(TAG, "LED test done");
 }
 
-static void init_wifi_espnow(void)
+static void init_wifi_promiscuous(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_set_channel(ESPNOW_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE));
+    
+    // Bật promiscuous
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(promiscuous_cb));
+    
+    ESP_LOGI(TAG, "Promiscuous mode enabled");
 }
 
 void app_main(void)
@@ -78,23 +77,15 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     init_neopixel();
-    init_wifi_espnow();
+    init_wifi_promiscuous();
 
-    ESP_ERROR_CHECK(esp_now_init());
-    ESP_ERROR_CHECK(esp_now_register_recv_cb(now_recv_cb));
-
-    ESP_LOGI(TAG, "RX San sang.");
+    ESP_LOGI(TAG, "RX ready in promiscuous mode");
 
     while (1) {
-        if (g_packet_received) {
-            g_packet_received = false;
-            
-            led_strip_set_pixel(led_strip, 0, 0, 15, 0);  // Xanh lá
-            led_strip_refresh(led_strip);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            led_strip_clear(led_strip);
-            led_strip_refresh(led_strip);
-        }
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        // In thống kê mỗi giây
+        static uint32_t last_csi = 0;
+        ESP_LOGI(TAG, "CSI packets/sec: %lu", csi_count - last_csi);
+        last_csi = csi_count;
     }
 }
