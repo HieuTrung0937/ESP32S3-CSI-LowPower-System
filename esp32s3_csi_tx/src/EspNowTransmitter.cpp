@@ -32,10 +32,13 @@ void EspNowTransmitter::s_send_cb(const wifi_tx_info_t *info,
 // ── Send loop task ────────────────────────────────────────────────────────────
 void EspNowTransmitter::s_send_task(void *arg) {
     auto *self = static_cast<EspNowTransmitter *>(arg);
+    
+    // Điều chỉnh chu kỳ
+    const TickType_t interval = pdMS_TO_TICKS(50);  // 50ms = 20Hz
 
     while (1) {
         self->tx_data_.packet_seq++;
-        self->tx_data_.timestamp_ms    = esp_timer_get_time() / 1000;  // uint64, không cast
+        self->tx_data_.timestamp_ms = esp_timer_get_time() / 1000;
         self->tx_data_.telemetry_value += 0.01f;
 
         esp_err_t err = esp_now_send(
@@ -48,15 +51,15 @@ void EspNowTransmitter::s_send_task(void *arg) {
             ESP_LOGE("TX_TASK", "esp_now_send failed: %s", esp_err_to_name(err));
         }
 
-        // Tắt LED sau 30ms (LED được bật trong s_send_cb)
-        vTaskDelay(pdMS_TO_TICKS(30));
+        // LED nháy nhanh hơn
+        vTaskDelay(pdMS_TO_TICKS(10));
         if (self->led_strip_) {
             led_strip_clear(self->led_strip_);
             led_strip_refresh(self->led_strip_);
         }
 
-        // Nghỉ nốt phần còn lại của chu kỳ 1 giây
-        vTaskDelay(pdMS_TO_TICKS(970));
+        // Chờ đến chu kỳ tiếp theo
+        vTaskDelayUntil(&self->last_wake_time, interval);
     }
 }
 
@@ -147,10 +150,10 @@ void EspNowTransmitter::begin() {
     s_instance = this;
 
     init_nvs();
-    init_led();       // LED trước để test boot
+    // init_led();       // LED trước để test boot
     init_wifi();
     init_espnow();
-
+    last_wake_time = xTaskGetTickCount();
     ESP_LOGI("TX", "EspNowTransmitter started — 1 Hz, PHY 11G 2Mbps");
 
     xTaskCreatePinnedToCore(s_send_task, "tx_send", 4096, this, 5, nullptr, 1);

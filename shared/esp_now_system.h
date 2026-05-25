@@ -22,6 +22,7 @@
 // 5. Driver ngoại vi (LED NeoPixel)
 #include "led_strip.h"
 #include "driver/gpio.h"
+
 // 6. Cấu hình định tuyến và gói tin của dự án
 #include "config.h"
 
