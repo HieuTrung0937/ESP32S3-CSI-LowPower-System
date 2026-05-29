@@ -1,8 +1,11 @@
 #ifndef CSI_RECEIVER_HPP
 #define CSI_RECEIVER_HPP
-
+#include "math.h"
 #include "esp_now_system.h"
 #include "freertos/queue.h"
+
+// Macro để đặt code vào IRAM
+#define CSI_IRAM_ATTR __attribute__((section(".iram1")))
 
 typedef struct {
     uint16_t frame_ctrl;
@@ -15,7 +18,7 @@ typedef struct {
 class CsiReceiver {
 public:
     void begin();
-
+    ~CsiReceiver();
 private:
     led_strip_handle_t led_strip_   = nullptr;
     QueueHandle_t      event_queue_ = nullptr;
