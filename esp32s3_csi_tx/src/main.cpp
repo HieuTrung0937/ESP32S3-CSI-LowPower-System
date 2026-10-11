@@ -1,22 +1,19 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <esp_timer.h>
-#include <cstdio>
-#include <CSIFallGuard.h>
+#include "esp32s3-csi-har.h"
 
 uint8_t tx_mac[] = {0x80, 0xB5, 0x4E, 0xDE, 0xEE, 0x70};
 uint8_t rx_mac[] = {0x80, 0xB5, 0x4E, 0xDE, 0xEC, 0x48};
 
 extern "C" void app_main() {
-    // Cấu hình bắt buộc (cả 3 dòng)
-    CSIFallGuard_set_tx_mac(tx_mac);
-    CSIFallGuard_set_rx_mac(rx_mac);
-    CSIFallGuard_set_channel(1);          // dù mặc định là 1, vẫn nên set
+    // 1. Cấu hình MAC
+    csi_har_set_mac(tx_mac, rx_mac);
 
-    CSIFallGuard_begin(MODE_TX, 1);       // mode TX
-    
+    // 2. Khởi tạo TX ở Channel 1 (HT20 MCS0)
+    csi_har_begin(CSI_MODE_TX, 1);
+
+    // 3. Sleep nhường CPU cho FreeRTOS Task gửi gói
     while (1) {
-        CSIFallGuard_update();
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
